@@ -38,18 +38,39 @@ class ViolenceCNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),
         )
-        
-        self.classifier = nn.Sequential(
+
+        self.pre_recurrence = nn.Sequential(
             nn.AdaptiveAvgPool2d((7, 7)),
             nn.Flatten(),
             nn.Dropout(0.5),
             nn.Linear(256 * 7 * 7, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(0.5),
+        )
+        
+        self.recurrence = nn.Sequential(
+            nn.Linear(1024, 800),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(800, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(0.5),
             nn.Linear(512, num_classes)
         )
     
-    def forward(self, x):
-        x = self.features(x)
-        x = self.classifier(x)
+    def forward(self, batch):
+        y = torch.zeros_like(batch[0])
+
+        for i in range(len(x)):
+            x = batch[i]
+            x = self.features(x)
+            x = self.pre_recurrence(x)
+            z = torch.cat([y,x], 0)
+            y = self.recurrence(z)
+            
+        x = self.classifier(y)
         return x
