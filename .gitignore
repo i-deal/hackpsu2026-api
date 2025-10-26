@@ -1,3 +1,7 @@
+# Ignore history and backup env files
+.history/
+*.env_*.example
+*.env_*
 # Python
 __pycache__/
 *.py[cod]
@@ -178,6 +182,28 @@ data/*.m4v
 data/*.svi
 data/*.3gp
 data/*.3g2
+
+# Ignore large dataset folders and evidence
+data/DCSASS_dataset/
+data/DCSASS_dataset*/
+backend/data/DCSASS_dataset/
+backend/data/DCSASS_dataset*/
+backend/data/logs/
+backend/data/temp/
+backend/data/cache/
+evidence/
+evidence/metadata/
+evidence/*.json
+evidence/*.mp4
+evidence/*.avi
+evidence/*.mov
+evidence/*.mkv
+evidence/*.jpg
+evidence/*.png
+
+# Ignore environment and config files
+.env
+.env.*
 data/*.mxf
 data/*.roq
 data/*.nsv
