@@ -3,6 +3,7 @@
 *.env_*.example
 *.env_*
 # Python
+.DS_Store
 __pycache__/
 *.py[cod]
 *$py.class
@@ -212,3 +213,7 @@ data/*.f4v
 data/*.f4p
 data/*.f4a
 data/*.f4b
+.venv/
+backend/data/
+wandb/
+backend/__pycache__/
