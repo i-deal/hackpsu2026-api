@@ -187,3 +187,7 @@ data/*.f4v
 data/*.f4p
 data/*.f4a
 data/*.f4b
+.venv/
+backend/data/
+wandb/
+backend/__pycache__/

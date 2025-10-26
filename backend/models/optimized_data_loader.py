@@ -66,6 +66,10 @@ class OptimizedDCSASSVideoDataset(Dataset):
         self.cache_dir = Path(cache_dir)
         self.use_cache = use_cache
         self.max_workers = max_workers
+
+        if data_root is None:
+            data_root = Path(__file__).parent.parent / "data" / "DCSASS Dataset"
+        self.data_root = Path(data_root)
         
         # Create cache directory
         if self.use_cache:
@@ -263,6 +267,13 @@ class OptimizedDCSASSVideoDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
     
+    def remap_label(self, original_label: int) -> int:
+        reverse_labels = {3:'Assault', 8:'Robbery', 10:'Shoplifting', 9:'Shooting', 11:'Stealing'} # else: 'Normal'
+        if original_label in reverse_labels:
+            return 1
+        else:
+            return 0
+    
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
         """Get a sample from the dataset with optimized loading"""
         sample = self.samples[idx]
@@ -299,7 +310,7 @@ class OptimizedDCSASSVideoDataset(Dataset):
             # Truncate to 15 frames
             video_tensor = video_tensor[:15]
         
-        return video_tensor, sample['label']
+        return video_tensor, self.remap_label(sample['label'])
 
 
 class OptimizedDCSASSDataLoader:
@@ -310,7 +321,7 @@ class OptimizedDCSASSDataLoader:
     def __init__(
         self,
         data_root: str = "data/DCSASS Dataset/",
-        batch_size: int = 8,
+        batch_size: int = 1,
         num_workers: int = 4,
         train_split: float = 0.8,
         val_split: float = 0.1,
@@ -370,10 +381,10 @@ class OptimizedDCSASSDataLoader:
             self.train_dataset, shuffle=True, pin_memory=pin_memory, persistent_workers=persistent_workers
         )
         self.val_loader = self._create_optimized_data_loader(
-            self.val_dataset, shuffle=False, pin_memory=pin_memory, persistent_workers=persistent_workers
+            self.val_dataset, shuffle=True, pin_memory=pin_memory, persistent_workers=persistent_workers
         )
         self.test_loader = self._create_optimized_data_loader(
-            self.test_dataset, shuffle=False, pin_memory=pin_memory, persistent_workers=persistent_workers
+            self.test_dataset, shuffle=True, pin_memory=pin_memory, persistent_workers=persistent_workers
         )
         
         logger.info(f"Optimized data loaders created:")
@@ -412,7 +423,7 @@ class OptimizedDCSASSDataLoader:
         
         return train_dataset, val_dataset, test_dataset
     
-    def _create_optimized_data_loader(self, dataset, shuffle: bool = False, pin_memory: bool = True, persistent_workers: bool = True) -> DataLoader:
+    def _create_optimized_data_loader(self, dataset, shuffle: bool = True, pin_memory: bool = True, persistent_workers: bool = True) -> DataLoader:
         """Create optimized PyTorch DataLoader"""
         return DataLoader(
             dataset,
