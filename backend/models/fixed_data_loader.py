@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Optimized DCSASS Dataset Data Loader
-High-performance version with caching, parallel processing, and memory optimization
+Fixed DCSASS Dataset Data Loader
+Properly shuffles data to prevent training plateau
 """
 import os
 import random
@@ -25,16 +25,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class OptimizedDCSASSVideoDataset(Dataset):
+class FixedDCSASSVideoDataset(Dataset):
     """
-    Optimized dataset class for DCSASS video clips with caching and parallel processing
+    Fixed dataset class with proper shuffling to prevent training plateau
     """
     
     def __init__(
         self, 
         data_root: str = "data/DCSASS Dataset/",
         crime_types: Optional[List[str]] = None,
-        max_videos_per_crime: int = 1,
+        max_videos_per_crime: int = 3,  # Use multiple videos per crime type
         clip_duration: float = 2.0,
         target_size: Tuple[int, int] = (224, 224),
         transform=None,
@@ -44,12 +44,12 @@ class OptimizedDCSASSVideoDataset(Dataset):
         max_workers: int = 4
     ):
         """
-        Initialize Optimized DCSASS Dataset
+        Initialize Fixed DCSASS Dataset with proper shuffling
         
         Args:
             data_root: Path to DCSASS Dataset directory
             crime_types: List of crime types to include (None = all)
-            max_videos_per_crime: Always 1 - randomly select one video folder per crime type
+            max_videos_per_crime: Number of video folders per crime type (3 for better diversity)
             clip_duration: Duration of existing clips (2.0 seconds)
             target_size: Target frame size (height, width)
             transform: PyTorch transforms to apply
@@ -66,10 +66,6 @@ class OptimizedDCSASSVideoDataset(Dataset):
         self.cache_dir = Path(cache_dir)
         self.use_cache = use_cache
         self.max_workers = max_workers
-
-        if data_root is None:
-            data_root = Path(__file__).parent.parent / "data" / "DCSASS Dataset"
-        self.data_root = Path(data_root)
         
         # Create cache directory
         if self.use_cache:
@@ -89,8 +85,8 @@ class OptimizedDCSASSVideoDataset(Dataset):
             
         logger.info(f"Found crime types: {self.crime_types}")
         
-        # Build dataset with parallel processing
-        self.samples = self._build_dataset_parallel(max_videos_per_crime)
+        # Build dataset with proper shuffling
+        self.samples = self._build_dataset_with_shuffling(max_videos_per_crime)
         logger.info(f"Dataset built with {len(self.samples)} samples")
         
     def _get_default_transform(self):
@@ -102,58 +98,48 @@ class OptimizedDCSASSVideoDataset(Dataset):
                               std=[0.229, 0.224, 0.225])
         ])
     
-    def _build_dataset_parallel(self, max_videos_per_crime: int) -> List[Dict]:
-        """Build dataset with parallel processing and proper shuffling"""
-        samples = []
+    def _build_dataset_with_shuffling(self, max_videos_per_crime: int) -> List[Dict]:
+        """Build dataset with proper shuffling to prevent training plateau"""
+        all_samples = []
         
-        # Use ThreadPoolExecutor for parallel processing
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = []
+        # Collect samples from all crime types
+        for crime_type in self.crime_types:
+            crime_dir = self.data_root / crime_type
             
-            for crime_type in self.crime_types:
-                future = executor.submit(self._process_crime_type, crime_type)
-                futures.append(future)
-            
-            # Collect results
-            for future in futures:
-                crime_samples = future.result()
-                samples.extend(crime_samples)
-        
-        # Shuffle the final samples to ensure proper randomization
-        random.shuffle(samples)
-        logger.info(f"Dataset shuffled with {len(samples)} samples")
+            if not crime_dir.exists():
+                logger.warning(f"Crime directory not found: {crime_dir}")
+                continue
                 
-        return samples
-    
-    def _process_crime_type(self, crime_type: str) -> List[Dict]:
-        """Process a single crime type (runs in parallel)"""
-        crime_dir = self.data_root / crime_type
-        
-        if not crime_dir.exists():
-            logger.warning(f"Crime directory not found: {crime_dir}")
-            return []
+            # Get all video folders for this crime type
+            video_folders = [d for d in crime_dir.iterdir() 
+                           if d.is_dir() and d.name.endswith('.mp4')]
             
-        # Get all video folders for this crime type
-        video_folders = [d for d in crime_dir.iterdir() 
-                       if d.is_dir() and d.name.endswith('.mp4')]
+            if not video_folders:
+                logger.warning(f"No video folders found for {crime_type}")
+                continue
+            
+            # Randomly select multiple video folders per crime type for diversity
+            selected_folders = random.sample(
+                video_folders, 
+                min(max_videos_per_crime, len(video_folders))
+            )
+            
+            logger.info(f"Selected {len(selected_folders)} video folders for {crime_type}")
+            
+            # Get ALL clips from the selected video folders
+            for video_folder in selected_folders:
+                clips = self._get_clips_from_folder(video_folder, crime_type)
+                all_samples.extend(clips)
+                logger.info(f"  Loaded {len(clips)} clips from {video_folder.name}")
         
-        if not video_folders:
-            logger.warning(f"No video folders found for {crime_type}")
-            return []
+        # CRITICAL: Shuffle all samples to prevent training plateau
+        random.shuffle(all_samples)
+        logger.info(f"Dataset shuffled with {len(all_samples)} total samples")
         
-        # Randomly select ONE video folder per crime type
-        selected_folder = random.choice(video_folders)
-        
-        logger.info(f"Selected video folder for {crime_type}: {selected_folder.name}")
-        
-        # Get ALL clips from the selected video folder
-        clips = self._get_clips_from_folder_fast(selected_folder, crime_type)
-        logger.info(f"  Loaded {len(clips)} clips from {selected_folder.name}")
-        
-        return clips
+        return all_samples
     
-    def _get_clips_from_folder_fast(self, video_folder: Path, crime_type: str) -> List[Dict]:
-        """Fast clip extraction with caching"""
+    def _get_clips_from_folder(self, video_folder: Path, crime_type: str) -> List[Dict]:
+        """Get all clips from a video folder"""
         clips = []
         
         # Get all video files in the folder
@@ -267,13 +253,6 @@ class OptimizedDCSASSVideoDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
     
-    def remap_label(self, original_label: int) -> int:
-        reverse_labels = {3:'Assault', 8:'Robbery', 10:'Shoplifting', 9:'Shooting', 11:'Stealing'} # else: 'Normal'
-        if original_label in reverse_labels:
-            return 1
-        else:
-            return 0
-    
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
         """Get a sample from the dataset with optimized loading"""
         sample = self.samples[idx]
@@ -310,23 +289,23 @@ class OptimizedDCSASSVideoDataset(Dataset):
             # Truncate to 15 frames
             video_tensor = video_tensor[:15]
         
-        return video_tensor, self.remap_label(sample['label'])
+        return video_tensor, sample['label']
 
 
-class OptimizedDCSASSDataLoader:
+class FixedDCSASSDataLoader:
     """
-    Optimized data loader class for DCSASS Dataset with performance improvements
+    Fixed data loader with proper shuffling to prevent training plateau
     """
     
     def __init__(
         self,
         data_root: str = "data/DCSASS Dataset/",
-        batch_size: int = 1,
+        batch_size: int = 8,
         num_workers: int = 4,
         train_split: float = 0.8,
         val_split: float = 0.1,
         test_split: float = 0.1,
-        max_videos_per_crime: int = 1,
+        max_videos_per_crime: int = 3,  # Use multiple videos for diversity
         clip_duration: float = 2.0,
         target_size: Tuple[int, int] = (224, 224),
         random_seed: int = 42,
@@ -336,31 +315,15 @@ class OptimizedDCSASSDataLoader:
         persistent_workers: bool = True
     ):
         """
-        Initialize Optimized DCSASS Data Loader
-        
-        Args:
-            data_root: Path to DCSASS Dataset
-            batch_size: Batch size for DataLoader
-            num_workers: Number of worker processes (optimized)
-            train_split: Fraction of data for training
-            val_split: Fraction of data for validation
-            test_split: Fraction of data for testing
-            max_videos_per_crime: Max videos per crime type
-            clip_duration: Duration of each clip in seconds
-            target_size: Target frame size
-            random_seed: Random seed for reproducibility
-            use_cache: Whether to use frame caching
-            cache_dir: Directory for caching
-            pin_memory: Use pinned memory for faster GPU transfer
-            persistent_workers: Keep workers alive between epochs
+        Initialize Fixed DCSASS Data Loader with proper shuffling
         """
         self.data_root = data_root
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.random_seed = random_seed
         
-        # Create optimized dataset
-        self.dataset = OptimizedDCSASSVideoDataset(
+        # Create fixed dataset with proper shuffling
+        self.dataset = FixedDCSASSVideoDataset(
             data_root=data_root,
             max_videos_per_crime=max_videos_per_crime,
             clip_duration=clip_duration,
@@ -371,46 +334,43 @@ class OptimizedDCSASSDataLoader:
             max_workers=num_workers
         )
         
-        # Split dataset
-        self.train_dataset, self.val_dataset, self.test_dataset = self._split_dataset(
+        # Split dataset with proper shuffling
+        self.train_dataset, self.val_dataset, self.test_dataset = self._split_dataset_with_shuffling(
             train_split, val_split, test_split
         )
         
-        # Create optimized data loaders
+        # Create optimized data loaders with proper shuffling
         self.train_loader = self._create_optimized_data_loader(
             self.train_dataset, shuffle=True, pin_memory=pin_memory, persistent_workers=persistent_workers
         )
         self.val_loader = self._create_optimized_data_loader(
-            self.val_dataset, shuffle=True, pin_memory=pin_memory, persistent_workers=persistent_workers
+            self.val_dataset, shuffle=False, pin_memory=pin_memory, persistent_workers=persistent_workers
         )
         self.test_loader = self._create_optimized_data_loader(
-            self.test_dataset, shuffle=True, pin_memory=pin_memory, persistent_workers=persistent_workers
+            self.test_dataset, shuffle=False, pin_memory=pin_memory, persistent_workers=persistent_workers
         )
         
-        logger.info(f"Optimized data loaders created:")
+        logger.info(f"Fixed data loaders created with proper shuffling:")
         logger.info(f"  Train: {len(self.train_dataset)} samples")
         logger.info(f"  Val: {len(self.val_dataset)} samples")
         logger.info(f"  Test: {len(self.test_dataset)} samples")
         logger.info(f"  Workers: {num_workers}")
         logger.info(f"  Cache: {'Enabled' if use_cache else 'Disabled'}")
+        logger.info(f"  Videos per crime: {max_videos_per_crime}")
     
-    def _split_dataset(self, train_split: float, val_split: float, test_split: float):
-        """Split dataset into train/val/test with proper shuffling"""
+    def _split_dataset_with_shuffling(self, train_split: float, val_split: float, test_split: float):
+        """Split dataset with proper shuffling to prevent training plateau"""
         total_samples = len(self.dataset)
         
         train_size = int(total_samples * train_split)
         val_size = int(total_samples * val_split)
         test_size = total_samples - train_size - val_size
         
-        # Create indices for splitting with proper shuffling
+        # Create indices for splitting
         indices = list(range(total_samples))
         
-        # Use different random state for shuffling to ensure proper randomization
-        import random
-        random_state = random.getstate()
-        random.seed(self.random_seed)
+        # Shuffle indices to ensure proper randomization
         random.shuffle(indices)
-        random.setstate(random_state)
         
         train_indices = indices[:train_size]
         val_indices = indices[train_size:train_size + val_size]
@@ -421,10 +381,15 @@ class OptimizedDCSASSDataLoader:
         val_dataset = torch.utils.data.Subset(self.dataset, val_indices)
         test_dataset = torch.utils.data.Subset(self.dataset, test_indices)
         
+        logger.info(f"Dataset split with shuffling:")
+        logger.info(f"  Train: {len(train_indices)} samples")
+        logger.info(f"  Val: {len(val_indices)} samples")
+        logger.info(f"  Test: {len(test_indices)} samples")
+        
         return train_dataset, val_dataset, test_dataset
     
-    def _create_optimized_data_loader(self, dataset, shuffle: bool = True, pin_memory: bool = True, persistent_workers: bool = True) -> DataLoader:
-        """Create optimized PyTorch DataLoader"""
+    def _create_optimized_data_loader(self, dataset, shuffle: bool = False, pin_memory: bool = True, persistent_workers: bool = True) -> DataLoader:
+        """Create optimized PyTorch DataLoader with proper shuffling"""
         return DataLoader(
             dataset,
             batch_size=self.batch_size,
@@ -452,7 +417,8 @@ class OptimizedDCSASSDataLoader:
             'clip_duration': self.dataset.clip_duration,
             'target_size': self.dataset.target_size,
             'cache_enabled': self.dataset.use_cache,
-            'workers': self.num_workers
+            'workers': self.num_workers,
+            'videos_per_crime': 3  # Fixed value
         }
     
     def clear_cache(self):
@@ -464,17 +430,17 @@ class OptimizedDCSASSDataLoader:
             logger.info("Cache cleared")
 
 
-def test_optimized_data_loader():
-    """Test the optimized data loader"""
-    logger.info("🚀 Testing Optimized DCSASS Data Loader...")
+def test_fixed_data_loader():
+    """Test the fixed data loader with proper shuffling"""
+    logger.info("🔧 Testing Fixed DCSASS Data Loader with Proper Shuffling...")
     
     try:
-        # Create optimized data loader
-        data_loader = OptimizedDCSASSDataLoader(
+        # Create fixed data loader
+        data_loader = FixedDCSASSDataLoader(
             data_root="data/DCSASS Dataset/",
             batch_size=8,
             num_workers=4,
-            max_videos_per_crime=1,
+            max_videos_per_crime=3,  # Use 3 videos per crime for diversity
             clip_duration=2.0,
             target_size=(224, 224),
             use_cache=True,
@@ -484,19 +450,28 @@ def test_optimized_data_loader():
         
         # Get dataset info
         info = data_loader.get_dataset_info()
-        logger.info(f"✅ Optimized dataset loaded successfully!")
+        logger.info(f"✅ Fixed dataset loaded successfully!")
         logger.info(f"   Total samples: {info['total_samples']}")
         logger.info(f"   Crime types: {info['num_crime_types']}")
         logger.info(f"   Batch size: {info['batch_size']}")
-        logger.info(f"   Cache enabled: {info['cache_enabled']}")
-        logger.info(f"   Workers: {info['workers']}")
+        logger.info(f"   Videos per crime: {info['videos_per_crime']}")
+        
+        # Test shuffling by checking first few batches
+        logger.info("🔄 Testing data shuffling...")
+        first_batch_labels = []
+        for batch_idx, (videos, labels) in enumerate(data_loader.train_loader):
+            first_batch_labels.extend(labels.tolist())
+            if batch_idx >= 2:  # Check first 3 batches
+                break
+        
+        logger.info(f"   First batch labels: {first_batch_labels[:16]}")  # Show first 16 labels
+        logger.info(f"   Label diversity: {len(set(first_batch_labels))} unique labels in first 3 batches")
         
         # Test loading speed
         logger.info("🔄 Testing batch loading speed...")
         start_time = time.time()
         
         for batch_idx, (videos, labels) in enumerate(data_loader.train_loader):
-            logger.info(f"   Batch {batch_idx + 1}: {videos.shape}, {labels.shape}")
             if batch_idx >= 2:  # Test first 3 batches
                 break
         
@@ -506,10 +481,10 @@ def test_optimized_data_loader():
         return True
         
     except Exception as e:
-        logger.error(f"❌ Optimized data loader test failed: {e}")
+        logger.error(f"❌ Fixed data loader test failed: {e}")
         return False
 
 
 if __name__ == "__main__":
-    # Test the optimized data loader
-    test_optimized_data_loader()
+    # Test the fixed data loader
+    test_fixed_data_loader()
