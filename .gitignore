@@ -1,3 +1,7 @@
+# Ignore history and backup env files
+.history/
+*.env_*.example
+*.env_*
 # Python
 .DS_Store
 __pycache__/
