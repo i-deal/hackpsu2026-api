@@ -1,2 +1,5 @@
 .venv/
 backend/data/
+wandb/
+backend/__pycache__/
+backend/cache/

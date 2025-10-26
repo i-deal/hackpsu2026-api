@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 import logging
+from pathlib import Path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +29,7 @@ class DCSASSVideoDataset(Dataset):
     
     def __init__(
         self,
-        data_root: str = "data/DCSASS Dataset/",
+        data_root: None,
         crime_types: Optional[List[str]] = None,
         max_videos_per_crime: int = 1,  # Always 1 folder per crime type
         clip_duration: float = 2.0,  # Existing 2-second clips
@@ -53,6 +54,10 @@ class DCSASSVideoDataset(Dataset):
         self.target_size = target_size
         self.transform = transform or self._get_default_transform()
         self.random_seed = random_seed
+
+        if data_root is None:
+            data_root = Path(__file__).parent.parent / "data" / "DCSASS Dataset"
+        self.data_root = Path(data_root)
         
         # Set random seed
         random.seed(random_seed)
@@ -224,7 +229,7 @@ class DCSASSDataLoader:
     def __init__(
         self,
         data_root: str = "data/DCSASS Dataset/",
-        batch_size: int = 8,
+        batch_size: int = 1,
         num_workers: int = 4,
         train_split: float = 0.8,
         val_split: float = 0.1,
