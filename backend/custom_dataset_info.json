@@ -1,0 +1,25 @@
+{
+  "total_samples": 832,
+  "crime_type_counts": {
+    "RoadAccidents": 64,
+    "Arson": 64,
+    "Shoplifting": 64,
+    "Stealing": 64,
+    "Burglary": 64,
+    "Fighting": 64,
+    "Vandalism": 64,
+    "Explosion": 64,
+    "Arrest": 64,
+    "Abuse": 64,
+    "Robbery": 64,
+    "Assault": 64,
+    "Shooting": 64
+  },
+  "num_crime_types": 13,
+  "batch_size": 4,
+  "clip_duration": 3.0,
+  "target_size": [
+    256,
+    256
+  ]
+}
